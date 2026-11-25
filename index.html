@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Invitation Tracker</title>
+<title>Engagement Invitation Tracker</title>
 <style>
 :root{--bg:#fbf6ee;--card:#fff;--text:#2b2118;--muted:#7a6a5b;--line:#eadfce;--accent:#b5472f;--ok:#2e7d4f;--okbg:#e3f3e9;--pend:#b36b00;--pendbg:#fff1d6;
 box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -37,6 +37,18 @@ input{width:100%;font:inherit;padding:14px;border-radius:10px;border:1px solid v
 .del{font:inherit;font-size:15px;border:0;background:none;color:var(--muted);padding:12px 8px;cursor:pointer}
 .del.sure{color:#fff;background:#c0392b;border-radius:8px}
 .empty{text-align:center;color:var(--muted);padding:24px 0}
+.st{font-size:15px;margin:0 0 12px;padding:8px 12px;border-radius:10px}
+.st.ok{background:var(--okbg);color:var(--ok)}
+.st.bad{background:var(--pendbg);color:var(--pend);font-weight:700}
+.copy{margin-top:18px;background:var(--card);color:var(--text);border:1px solid var(--line)}
+.hint{font-size:15px;color:var(--muted);margin:8px 0}
+.cnt{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.step{display:flex;align-items:center;gap:6px;margin-top:6px}
+.cnt .step{margin-top:0}
+.step button{width:44px;height:44px;font:inherit;font-size:22px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);cursor:pointer}
+.step b{min-width:56px;text-align:center;font-size:18px}
+.cnt .step b{font-size:22px;min-width:36px}
+textarea{width:100%;font:inherit;font-size:16px;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text)}
 .reset{display:block;margin:18px auto 0;font:inherit;font-size:15px;color:var(--muted);background:none;border:0;text-decoration:underline;cursor:pointer}
 </style>
 </head>
@@ -44,17 +56,20 @@ input{width:100%;font:inherit;padding:14px;border-radius:10px;border:1px solid v
 <div class="wrap">
   <h1>💌 Invitation Tracker</h1>
   <p class="sub">Tap a name’s button when you have invited them.</p>
+  <p class="st" id="status"></p>
 
   <div class="stats">
-    <div class="stat"><b id="nTotal">0</b><span>Total</span></div>
-    <div class="stat"><b id="nDone">0</b><span>Invited</span></div>
-    <div class="stat"><b id="nPend">0</b><span>Pending</span></div>
+    <div class="stat"><b id="nTotal">0</b><span>Total people</span></div>
+    <div class="stat"><b id="nDone">0</b><span>People invited</span></div>
+    <div class="stat"><b id="nPend">0</b><span>People pending</span></div>
   </div>
   <div class="bar"><div id="prog"></div></div>
+  <p class="sub" id="fam"></p>
 
   <div class="add">
     <input id="nameIn" placeholder="Name (e.g. Suresh Uncle)" autocomplete="off">
     <input id="noteIn" placeholder="Note or phone (optional)" autocomplete="off">
+    <div class="cnt"><span>How many people?</span><div class="step"><button type="button" id="cMinus">−</button><b id="cVal">1</b><button type="button" id="cPlus">+</button></div></div>
     <button class="btn" id="addBtn">+ Add person</button>
   </div>
 
@@ -67,17 +82,54 @@ input{width:100%;font:inherit;padding:14px;border-radius:10px;border:1px solid v
   </div>
 
   <div id="list"></div>
+  <button class="btn copy" id="copyBtn">📋 Copy list (backup / send on WhatsApp)</button>
+  <p class="hint" id="copyHint" style="display:none">List copied. If it did not copy, press and hold the text below and choose Copy.</p>
+  <textarea id="copyBox" readonly rows="8" style="display:none"></textarea>
   <button class="reset" id="resetBtn">Clear everything</button>
 </div>
 
 <script>
 var KEY="invite-tracker-v1", guests=[], filter="all", q="", sureId=null, sureReset=false;
-function load(){try{var r=localStorage.getItem(KEY);if(r)guests=JSON.parse(r)||[];}catch(e){guests=[];}}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(guests));}catch(e){}}
+var dbRef=null, dbOk=false, localOk=false, dbFail=false;
+function load(){try{var r=localStorage.getItem(KEY);if(r)guests=JSON.parse(r)||[];localStorage.setItem(KEY+"-t","1");localOk=true;}catch(e){localOk=false;}}
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify(guests));localOk=true;}catch(e){localOk=false;}
+  if(dbRef){dbRef.set({guests:guests}).then(function(){dbOk=true;dbFail=false;status();}).catch(function(){dbFail=true;status();});}
+  status();
+}
+function status(){
+  var s=document.getElementById("status");
+  if(dbRef&&!dbFail){s.textContent="✓ Saved online — safe on any phone you open this on";s.className="st ok";}
+  else if(localOk){s.textContent="✓ Saved on this phone";s.className="st ok";}
+  else{s.textContent="⚠ Not being saved — please use the Copy list button below to keep a backup";s.className="st bad";}
+}
+function initDb(){
+  if(!window.claude||!window.claude.use)return;
+  window.claude.use("db").then(function(db){
+    if(!db)return;
+    dbRef=db.doc("tracker/main");
+    dbRef.onSnapshot(function(snap){
+      if(snap.exists){var d=snap.data();if(d&&Array.isArray(d.guests)){guests=d.guests;try{localStorage.setItem(KEY,JSON.stringify(guests));}catch(e){}}dbOk=true;}
+      else if(guests.length){save();}
+      status();render();
+    },function(){dbFail=true;status();});
+    status();
+  }).catch(function(){});
+}
+function copyList(){
+  var p=guests.filter(function(g){return !g.done}), d=guests.filter(function(g){return g.done});
+  var t="PENDING ("+p.length+")\n"+p.map(function(g){return "- "+g.name+" x"+(g.n>0?g.n:1)+(g.note?" ("+g.note+")":"")}).join("\n")+"\n\nINVITED ("+d.length+")\n"+d.map(function(g){return "- "+g.name+" x"+(g.n>0?g.n:1)+(g.note?" ("+g.note+")":"")}).join("\n");
+  var box=document.getElementById("copyBox");box.style.display="block";box.value=t;box.focus();box.select();
+  try{if(navigator.clipboard)navigator.clipboard.writeText(t);}catch(e){}
+  document.getElementById("copyHint").style.display="block";
+}
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]});}
 
 function render(){
-  var done=guests.filter(function(g){return g.done}).length, total=guests.length;
+  function cn(g){return g.n>0?g.n:1;}
+  var total=0, done=0;
+  guests.forEach(function(g){total+=cn(g);if(g.done)done+=cn(g);});
+  document.getElementById("fam").textContent=guests.length+" invitations · "+guests.filter(function(g){return g.done}).length+" done";
   document.getElementById("nTotal").textContent=total;
   document.getElementById("nDone").textContent=done;
   document.getElementById("nPend").textContent=total-done;
@@ -93,7 +145,7 @@ function render(){
   } else {
     el.innerHTML=shown.map(function(g){
       return '<div class="guest"><div class="main"><div class="name">'+esc(g.name)+'</div>'+
-      (g.note?'<div class="note">'+esc(g.note)+'</div>':'')+'</div>'+
+      (g.note?'<div class="note">'+esc(g.note)+'</div>':'')+'<div class="step"><button data-m="'+g.id+'">−</button><b>👥 '+cn(g)+'</b><button data-p="'+g.id+'">+</button></div></div>'+
       '<button class="status '+(g.done?'done':'pending')+'" data-t="'+g.id+'">'+(g.done?'✓ Invited':'Pending')+'</button>'+
       '<button class="del'+(sureId===g.id?' sure':'')+'" data-d="'+g.id+'">'+(sureId===g.id?'Sure?':'✕')+'</button></div>';
     }).join("");
@@ -104,8 +156,8 @@ function render(){
 function add(){
   var n=document.getElementById("nameIn"), t=document.getElementById("noteIn");
   var name=n.value.trim(); if(!name){n.focus();return;}
-  guests.unshift({id:Date.now()+Math.random(),name:name,note:t.value.trim(),done:false});
-  n.value="";t.value="";save();render();n.focus();
+  guests.unshift({id:Date.now()+Math.random(),name:name,note:t.value.trim(),n:addCount,done:false});
+  n.value="";t.value="";addCount=1;document.getElementById("cVal").textContent=1;save();render();n.focus();
 }
 
 document.getElementById("addBtn").onclick=add;
@@ -116,7 +168,8 @@ document.querySelectorAll(".tab").forEach(function(b){
   b.onclick=function(){filter=b.dataset.f;document.querySelectorAll(".tab").forEach(function(x){x.classList.toggle("on",x===b)});render();};
 });
 document.getElementById("list").onclick=function(e){
-  var t=e.target.closest("[data-t]"), d=e.target.closest("[data-d]");
+  var t=e.target.closest("[data-t]"), d=e.target.closest("[data-d]"), m=e.target.closest("[data-m]"), p=e.target.closest("[data-p]");
+  if(m||p){var pid=(m||p).dataset[m?"m":"p"];var pg=guests.find(function(x){return String(x.id)===pid});if(pg){var c=pg.n>0?pg.n:1;pg.n=m?Math.max(1,c-1):Math.min(99,c+1);save();render();}return;}
   if(t){var g=guests.find(function(x){return String(x.id)===t.dataset.t});if(g){g.done=!g.done;save();}sureId=null;render();}
   else if(d){
     var id=d.dataset.d;
@@ -130,7 +183,11 @@ document.getElementById("resetBtn").onclick=function(){
   else{sureReset=true;setTimeout(function(){sureReset=false;render();},3000);}
   render();
 };
-load();render();
+var addCount=1;
+document.getElementById("cMinus").onclick=function(){addCount=Math.max(1,addCount-1);document.getElementById("cVal").textContent=addCount;};
+document.getElementById("cPlus").onclick=function(){addCount=Math.min(99,addCount+1);document.getElementById("cVal").textContent=addCount;};
+document.getElementById("copyBtn").onclick=copyList;
+load();render();status();initDb();
 </script>
 </body>
 </html>
